@@ -1,11 +1,14 @@
-using LinearAlgebra, StaticArrays
+using LinearAlgebra
 import ProgressMeter
 using DynamicalSystemsBase: MinimalDiscreteIntegrator
 
 export lyapunovspectrum, lyapunov, local_growth_rates
+export NeighborNumber, WithinRange
+export lyapunov_from_data
+export Cityblock, Euclidean
 
 #####################################################################################
-#                               Lyapunov Spectum                                    #
+# Lyapunov Spectum
 #####################################################################################
 """
     lyapunovspectrum(ds::DynamicalSystem, N [, k::Int | Q0]; kwargs...) -> λs
@@ -70,8 +73,8 @@ ChaosTools.lyapunovspectrum_convergence(tinteg, N, Δt, Ttr)
 lyapunovspectrum(ds::DS, N, k::Int = dimension(ds); kwargs...) =
 lyapunovspectrum(ds, N, orthonormal(dimension(ds), k); kwargs...)
 
-function lyapunovspectrum(ds::DS{IIP, S, D}, N, Q0::AbstractMatrix; 
-        Ttr::Real = 0, Δt::Real = 1, u0 = get_state(ds), show_progress = false, 
+function lyapunovspectrum(ds::DS{IIP, S, D}, N, Q0::AbstractMatrix;
+        Ttr::Real = 0, Δt::Real = 1, u0 = get_state(ds), show_progress = false,
         diffeq = NamedTuple(), kwargs...
     ) where {IIP, S, D}
 
@@ -253,7 +256,7 @@ function lyapunovspectrum_convergence(ds::DDS{false, T, 1}, N; Ttr = 0) where {T
 end
 
 #####################################################################################
-#                           Maximum Lyapunov Exponent                               #
+# Maximum Lyapunov Exponent
 #####################################################################################
 inittest_default(D) = (state1, d0) -> state1 .+ d0/sqrt(D)
 
@@ -436,7 +439,7 @@ end
 
 
 #####################################################################################
-#                              Local Growth Rates                                   #
+# Local Growth Rates
 #####################################################################################
 """
     local_growth_rates(ds, points::Dataset; S=100, Δt=5, kwargs...) → λlocal
@@ -500,13 +503,10 @@ function _random_Q0(ds, u, j, e)
 end
 
 #####################################################################################
-#                    Numerical Lyapunov (from reconstruction)                       #
+# Numerical Lyapunov (from reconstruction)
 #####################################################################################
-using Neighborhood, StaticArrays
+using Neighborhood
 using Distances: Metric, Cityblock, Euclidean
-export NeighborNumber, WithinRange
-export lyapunov_from_data
-export Cityblock, Euclidean
 # Everything in this section is based on Ulrich Parlitz [1]
 
 """
@@ -620,7 +620,7 @@ function lyapunov_from_data(
             end
             E_n .+= E_m # no need to reset E_m
         end
-        if skippedm >= length(⋓)
+        if skippedm ≥ length(⋓)
             skippedn += 1
             skippedm = 0
             continue # be sure to continue if no valid point!
@@ -646,3 +646,17 @@ end
 @inline function delay_distance(::Euclidean, R, m, n, k)
     @inbounds norm(R[m+k] - R[n+k])
 end
+
+
+#####################################################################################
+# Numerical Lyapunov Spectrum
+#####################################################################################
+# Everything in this section is based on Ulrich Parlitz [1]
+
+"""
+    lyapunovspectrum_from_data(...)
+Estimate the full Lyapunov spectrum from a given dataset...
+"""
+function lyapunovspectrum_from_data()
+end
+
