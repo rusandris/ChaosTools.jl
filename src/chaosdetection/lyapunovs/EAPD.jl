@@ -1,4 +1,4 @@
-export ensemble_averaged_pairwise_distance,lyapunov_instant
+export ensemble_averaged_pairwise_distance, ensemble_averaged_pairwise_distance_benettin, lyapunov_instant
 
 """
     ensemble_averaged_pairwise_distance(ds, init_states::StateSpaceSet, T, pidx;kwargs...) -> ρ,t
@@ -61,8 +61,127 @@ ds = DeterministicIteratedMap(drifting_logistic, [0.1], p)
 
 [^JánosiTél2024]: Dániel Jánosi, Tamás Tél, Phys. Rep. **1092**, pp 1-64 (2024)
 """
+
+#TODO:add rescaling (Benettin-like algorithm)
+function ensemble_averaged_pairwise_distance_benettin(ds, init_states::StateSpaceSet, T, pidx;
+    initial_params=deepcopy(current_parameters(ds)), Ttr=0, perturbation=perturbation_normal,
+    Δt=1, max_rescale_time = T, d0=1e-10, d0_lower=d0 * 1e-3, d0_upper=d0 * 1e+3)
+
+    set_parameters!(ds, initial_params)
+    original_rate = current_parameter(ds, pidx)
+    N = length(init_states)
+    D = dimension(ds)
+    dimension(ds) != D && throw(AssertionError("Dimension of `ds` doesn't match dimension of states in init_states!"))
+
+    #duplicate every state
+    #(add test particle to every ensemble member)
+    init_states_plus_copies = StateSpaceSet(vcat(init_states, init_states))
+
+    #create a pds for the ensemble
+    #pds is a ParallelDynamicalSystem
+    pds = ParallelDynamicalSystem(ds, init_states_plus_copies)
+
+    #set to non-drifting for initial ensemble
+    set_parameter!(pds, pidx, 0.0)
+
+    #step system pds to reach attractor(non-drifting)
+    #system starts to drift at t0=0.0
+    for _ in 0:Δt:Ttr
+        step!(pds, Δt, true)
+    end
+
+    #add perturbation to test states
+    for i in 1:N
+        state_i = current_state(pds, i)
+        perturbed_state_i = state_i .+ perturbation(ds, d0)
+        #set_state!(pds.systems[N+i],perturbed_state_i)
+        set_state!(pds, perturbed_state_i, N + i)
+    end
+
+    #set to drifting for initial ensemble
+    set_parameter!(pds, pidx, original_rate)
+
+    #set back time to t0 = 0
+    reinit!(pds, current_states(pds))
+
+    #Benettin-like algorithm for ensembles
+    λs = Float64[]
+    ts = Float64[]
+    while current_time(pds) < T
+
+        d = ensemble_dist(pds)
+
+        if d == 0
+            @warn "Initial distance between states is zero!" *
+                  "Returning."
+            return λs, ts
+        end
+
+        if !(d0_lower ≤ d ≤ d0_upper)
+            @warn "After rescaling, the distance of reference and test states " *
+                  "was not `d0_lower ≤ d ≤ d0_upper` as expected." *
+                  "Perhaps you are using a dynamical system where the algorithm doesn't work." *
+                  "Returning."
+            return λs, ts
+        end
+
+        t0 = current_time(pds)
+        t = t0
+        #@show t0,d
+
+        #step ensemble until avg distance exits thresholds 
+        while d0_lower <= d <= d0_upper && (t-t0) ≤ max_rescale_time 
+            step!(pds, Δt, true)
+            d = ensemble_dist(pds)
+            t = current_time(pds)
+            (t ≥ T || t ≥ max_rescale_time) && break
+        end
+
+        ρ = ensemble_averaged_pairwise_distance(pds) #avg of log d_i
+        Δt = t - t0 
+        λ_t = ( ρ - log(d0) ) / Δt 
+        push!(λs,λ_t)
+        push!(ts, t)
+
+        rescale!(pds,d0)
+    end
+
+    return λs, ts
+
+end
+
+function rescale!(pds,d0)
+    states = current_states(pds)
+    N = Int(length(states) / 2)
+
+    #rescale along current distance vector
+    for i in 1:N
+        u1 = states[i]
+        u2 = states[N+i]
+        d = norm(u1-u2)
+        set_state!(pds, u1 .+ (u1 .- u2) ./ (d)  .* d0 , N + i)
+    end
+
+end
+
+function ensemble_dist(pds)
+
+    states = current_states(pds)
+    N = Int(length(states) / 2)
+
+    d_avg = 0.0
+    for i in 1:N
+       d_avg += norm(states[i] - states[N+i])
+    end
+
+    return d_avg / N
+end
+
+
+
 function ensemble_averaged_pairwise_distance(ds,init_states::StateSpaceSet,T,pidx;
-    initial_params = deepcopy(current_parameters(ds)),Ttr=0,perturbation=perturbation_normal,Δt = 1,ϵ=sqrt(dimension(ds))*1e-10)
+    initial_params = deepcopy(current_parameters(ds)),Ttr=0,perturbation=perturbation_normal,
+    Δt = 1,ϵ=sqrt(dimension(ds))*1e-10)
 
 	set_parameters!(ds,initial_params)
     original_rate = current_parameter(ds, pidx)
@@ -130,7 +249,7 @@ function ensemble_averaged_pairwise_distance(pds)
     #calculate distance averages
     ρ = 0.0
     for i in 1:N
-        ρ += log.(norm(states[i] - states[N+i]))
+        ρ += log(norm(states[i] - states[N+i]))
     end
     return ρ/N 
 
